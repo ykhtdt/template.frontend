@@ -54,6 +54,7 @@ module.exports = {
     "quotes": [
       "error",
       "double"
-    ]
+    ],
+    "eol-last": ["error", "always"]
   }
 };
