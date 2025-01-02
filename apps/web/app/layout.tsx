@@ -1,5 +1,7 @@
 import type { Metadata } from "next"
 
+import { ThemeProvider } from "next-themes"
+
 import { pretendard, hahmlet, source } from "~/app/fonts"
 
 import "@repo/ui/globals.css"
@@ -18,7 +20,14 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${pretendard.variable} ${hahmlet.variable} ${source.variable}`}>
-        {children}
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          {children}
+        </ThemeProvider>
       </body>
     </html >
   )
