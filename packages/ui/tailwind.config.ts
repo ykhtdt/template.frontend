@@ -1,4 +1,6 @@
 import type { Config } from "tailwindcss";
+import type { PluginAPI } from "tailwindcss/types/config";
+
 import tailwindcssAnimate from "tailwindcss-animate";
 
 const config = {
@@ -81,10 +83,23 @@ const config = {
       },
       height: {
         "18": "4.5rem",
-      }
+      },
+      fontFeatureSettings: {
+        tnum: "'tnum' 1",
+      },
     },
   },
-  plugins: [tailwindcssAnimate],
+  plugins: [
+    tailwindcssAnimate,
+    function ({ addUtilities, theme }: PluginAPI) {
+      const newUtilities = {
+        ".font-tnum": {
+          fontFeatureSettings: theme("fontFeatureSettings.tnum") as string,
+        },
+      }
+      addUtilities(newUtilities)
+    },
+  ],
 } satisfies Config;
 
 export default config;
