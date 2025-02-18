@@ -1,16 +1,12 @@
-import { Button } from "@repo/ui/components/ui/button"
+import { Button } from "@workspace/ui/components/button"
 
 export default function Page() {
   return (
-    <div className="relative flex min-h-screen flex-col bg-background">
-      <main className="flex flex-1 flex-col items-center justify-center">
-        <h1 className="mb-2 text-xl font-bold">
-          Turborepo & Shadcn/ui
-        </h1>
-        <Button>
-          @repo/ui Button
-        </Button>
-      </main>
+    <div className="flex items-center justify-center min-h-svh">
+      <div className="flex flex-col items-center justify-center gap-4">
+        <h1 className="text-2xl font-bold">Hello World</h1>
+        <Button size="sm">Button</Button>
+      </div>
     </div>
   )
 }
