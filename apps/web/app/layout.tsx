@@ -1,17 +1,8 @@
-import { Geist, Geist_Mono } from "next/font/google"
-
 import "@workspace/ui/globals.css"
-import { Providers } from "@/components/providers"
+import "@/app/styles/globals.css"
 
-const fontSans = Geist({
-  subsets: ["latin"],
-  variable: "--font-sans",
-})
-
-const fontMono = Geist_Mono({
-  subsets: ["latin"],
-  variable: "--font-mono",
-})
+import { ThemeProvider } from "@/app/providers"
+import { Pretendard } from "@/app/fonts"
 
 export default function RootLayout({
   children,
@@ -20,10 +11,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body
-        className={`${fontSans.variable} ${fontMono.variable} font-sans antialiased `}
-      >
-        <Providers>{children}</Providers>
+      <body className={`${Pretendard.variable} font-sans antialiased `}>
+        <ThemeProvider>
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   )
