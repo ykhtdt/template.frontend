@@ -1,2 +1,4 @@
-export { ModeToggle } from "./ModeToggle"
-
+export {
+  ModeToggle,
+  ModeToggleDropdown,
+} from "./ModeToggle"

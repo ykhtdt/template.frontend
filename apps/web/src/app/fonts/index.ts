@@ -1,1 +1,1 @@
-export { pretendard, hahmlet, source } from "./fonts"
+export { Pretendard } from "./fonts"

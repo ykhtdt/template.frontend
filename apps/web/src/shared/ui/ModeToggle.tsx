@@ -4,13 +4,13 @@ import { useTheme } from "next-themes"
 
 import { Moon, Sun } from "lucide-react"
 
-import { Button } from "@repo/ui/components/ui/button"
+import { Button } from "@workspace/ui/components/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@repo/ui/components/ui/dropdown-menu"
+} from "@workspace/ui/components/dropdown-menu"
 
 export const ModeToggleDropdown = () => {
   const { setTheme } = useTheme()
