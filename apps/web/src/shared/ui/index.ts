@@ -1,4 +1,4 @@
 export {
   ModeToggle,
   ModeToggleDropdown,
-} from "./ModeToggle"
+} from "./mode-toggle"
