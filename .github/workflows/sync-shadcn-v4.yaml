@@ -213,15 +213,20 @@ jobs:
           echo "changes=true" >> $GITHUB_OUTPUT
           git add .
           git commit -m "chore: sync shadcn/ui v4 components for monorepo"
+
+          # GitHub 토큰 설정
+          git config --local http.https://github.com/.extraheader "AUTHORIZATION: basic $(echo -n "x-access-token:${PERSONAL_ACCESS_TOKEN}" | base64)"
           git push -f origin sync/shadcn-v4-monorepo
           echo "Changes pushed to sync/shadcn-v4-monorepo branch"
+        env:
+          PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
 
       - name: Create Pull Request
         if: steps.check_changes.outputs.changes == 'true'
         id: create-pr
         uses: peter-evans/create-pull-request@v6
         with:
-          token: ${{ github.token }}
+          token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           commit-message: "chore: sync shadcn/ui v4 components for monorepo"
           title: "chore: sync shadcn/ui v4 components for monorepo"
           body: |
@@ -248,7 +253,7 @@ jobs:
 
       - name: PR Result
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
         run: |
           echo "Create PR 액션 결과: ${{ steps.create-pr.outputs.pull-request-number }}"
           if [ -n "${{ steps.create-pr.outputs.pull-request-number }}" ]; then
@@ -272,3 +277,9 @@ jobs:
             DIFF_COUNT=$(git diff origin/main..sync/shadcn-v4-monorepo --name-only | wc -l)
             echo "브랜치 간 변경된 파일 수: $DIFF_COUNT"
           fi
+
+      - name: Push changes again to ensure
+        env:
+          GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+        run: |
+          git push -f origin sync/shadcn-v4-monorepo
