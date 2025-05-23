@@ -46,13 +46,51 @@ jobs:
       - name: Clone shadcn/ui v4
         run: git clone --depth=1 https://github.com/shadcn-ui/ui.git tmp-shadcn-ui
 
-      - name: Copy components
+      - name: Copy components from shadcn/ui v4
         run: |
+          echo "Creating directories..."
           mkdir -p packages/ui/src/{components,lib,hooks,styles}
-          cp -r tmp-shadcn-ui/apps/v4/registry/new-york-v4/ui/* packages/ui/src/components/ || true
-          cp -r tmp-shadcn-ui/apps/v4/registry/new-york-v4/lib/* packages/ui/src/lib/ 2>/dev/null || true
-          cp -r tmp-shadcn-ui/apps/v4/registry/new-york-v4/hooks/* packages/ui/src/hooks/ 2>/dev/null || true
-          cp -r tmp-shadcn-ui/apps/v4/registry/new-york-v4/styles/* packages/ui/src/styles/ 2>/dev/null || true
+
+          echo "Copying from known structure at tmp-shadcn-ui/apps/v4/registry/new-york-v4..."
+
+          # Copy UI components
+          if [ -d "tmp-shadcn-ui/apps/v4/registry/new-york-v4/ui" ]; then
+            cp -rv tmp-shadcn-ui/apps/v4/registry/new-york-v4/ui/* packages/ui/src/components/
+            echo "UI components copied successfully"
+          else
+            echo "Error: UI components directory not found at expected path"
+            exit 1
+          fi
+
+          # Copy lib files
+          if [ -d "tmp-shadcn-ui/apps/v4/registry/new-york-v4/lib" ]; then
+            cp -rv tmp-shadcn-ui/apps/v4/registry/new-york-v4/lib/* packages/ui/src/lib/
+            echo "Lib files copied successfully"
+          else
+            echo "Warning: Lib directory not found at expected path"
+          fi
+
+          # Copy hooks
+          if [ -d "tmp-shadcn-ui/apps/v4/registry/new-york-v4/hooks" ]; then
+            cp -rv tmp-shadcn-ui/apps/v4/registry/new-york-v4/hooks/* packages/ui/src/hooks/
+            echo "Hooks copied successfully"
+          else
+            echo "Warning: Hooks directory not found at expected path"
+          fi
+
+          # Copy styles
+          if [ -d "tmp-shadcn-ui/apps/v4/registry/new-york-v4/styles" ]; then
+            cp -rv tmp-shadcn-ui/apps/v4/registry/new-york-v4/styles/* packages/ui/src/styles/
+            echo "Styles copied successfully"
+          else
+            echo "Warning: Styles directory not found at expected path"
+          fi
+
+          echo "Checking destination directories..."
+          ls -la packages/ui/src/components
+          ls -la packages/ui/src/lib 2>/dev/null || echo "No lib files copied"
+          ls -la packages/ui/src/hooks 2>/dev/null || echo "No hooks copied"
+          ls -la packages/ui/src/styles 2>/dev/null || echo "No styles copied"
 
       - name: Clean up temporary files
         run: rm -rf tmp-shadcn-ui
@@ -60,10 +98,13 @@ jobs:
       - name: Check for changes and push
         id: changes
         run: |
-          if git diff --quiet; then
+          git status
+          # Check if there's anything to commit
+          if [ -z "$(git status --porcelain)" ]; then
             echo "No changes detected"
             echo "changes=false" >> $GITHUB_OUTPUT
           else
+            echo "Changes detected, committing..."
             git add .
             git commit -m "chore: sync shadcn/ui v4 components for monorepo"
             git push -f origin sync/shadcn-v4-monorepo
@@ -74,7 +115,7 @@ jobs:
         if: steps.changes.outputs.changes == 'true'
         uses: peter-evans/create-pull-request@v6
         with:
-          token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "chore: sync shadcn/ui v4 components for monorepo"
           title: "chore: sync shadcn/ui v4 components for monorepo"
           body: |
