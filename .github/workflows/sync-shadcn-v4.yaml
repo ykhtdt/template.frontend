@@ -50,7 +50,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y jq rsync
+          sudo apt-get install -y jq
 
       - name: Clone shadcn/ui v4
         run: git clone --depth=1 https://github.com/shadcn-ui/ui.git tmp-shadcn-ui
@@ -84,86 +84,33 @@ jobs:
             echo "force_sync=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Sync from v4 registry components
+      - name: Copy components
         run: |
-          echo "Syncing components from v4 registry..."
+          echo "Copying components from v4 registry..."
+          # Create target directories
+          mkdir -p packages/ui/src/components
+          mkdir -p packages/ui/src/lib
+          mkdir -p packages/ui/src/hooks
+          mkdir -p packages/ui/src/styles
 
-          # V4 레지스트리 존재 확인
-          if [ ! -d "tmp-shadcn-ui" ]; then
-            echo "ERROR: tmp-shadcn-ui 디렉토리가 존재하지 않습니다."
-            exit 1
+          # Force remove existing files if force_sync is true
+          if [[ "${{ steps.check-merge.outputs.force_sync }}" == "true" ]]; then
+            echo "Forcing sync - removing existing files"
+            rm -rf packages/ui/src/components/*
+            rm -rf packages/ui/src/lib/*
+            rm -rf packages/ui/src/hooks/*
+            rm -rf packages/ui/src/styles/*
           fi
 
-          # 디렉토리 구조 디버깅
-          echo "=== 디렉토리 구조 확인 ==="
-          ls -la tmp-shadcn-ui
-          ls -la tmp-shadcn-ui/apps/v4/registry || echo "V4 registry path does not exist"
+          # Copy files using cp
+          cp -r tmp-shadcn-ui/apps/v4/registry/new-york-v4/ui/* packages/ui/src/components/
+          cp -r tmp-shadcn-ui/apps/v4/registry/new-york-v4/lib/* packages/ui/src/lib/ 2>/dev/null || echo "No lib files to copy"
+          cp -r tmp-shadcn-ui/apps/v4/registry/new-york-v4/hooks/* packages/ui/src/hooks/ 2>/dev/null || echo "No hooks files to copy"
+          cp -r tmp-shadcn-ui/apps/v4/registry/new-york-v4/styles/* packages/ui/src/styles/ 2>/dev/null || echo "No styles files to copy"
 
-          # V4 New York 레지스트리 컴포넌트 동기화
-          if [ -d tmp-shadcn-ui/apps/v4/registry/new-york-v4/ui ]; then
-            echo "=== V4 New York 레지스트리 컴포넌트 동기화 ==="
-
-            # force_sync가 true인 경우 --delete 옵션 추가하여 기존 파일을 덮어쓰기
-            if [[ "${{ steps.check-merge.outputs.force_sync }}" == "true" ]]; then
-              echo "모든 컴포넌트를 강제로 동기화합니다. 기존 파일을 덮어씁니다."
-              rsync -av --delete --exclude="*-demo.tsx" --exclude="*.stories.tsx" --exclude="*.test.tsx" \
-                tmp-shadcn-ui/apps/v4/registry/new-york-v4/ui/ packages/ui/src/components/ | tee rsync-components.log
-            else
-              # 일반 동기화 - 기존 파일 보존
-              rsync -av --exclude="*-demo.tsx" --exclude="*.stories.tsx" --exclude="*.test.tsx" \
-                tmp-shadcn-ui/apps/v4/registry/new-york-v4/ui/ packages/ui/src/components/ | tee rsync-components.log
-            fi
-
-            # rsync 결과 확인
-            if [ $? -ne 0 ]; then
-              echo "RSYNC ERROR: 컴포넌트 동기화 중 오류가 발생했습니다."
-              cat rsync-components.log
-              exit 1
-            fi
-
-            # 동기화 결과 확인
-            echo "=== 동기화 결과 확인 ==="
-            ls -la packages/ui/src/components/ || echo "컴포넌트 디렉토리가 존재하지 않습니다."
-
-            # utils, lib 동기화
-            if [ -d tmp-shadcn-ui/apps/v4/registry/new-york-v4/lib ]; then
-              echo "=== V4 New York 레지스트리 lib 동기화 ==="
-              rsync -av $([[ "${{ steps.check-merge.outputs.force_sync }}" == "true" ]] && echo "--delete") \
-                tmp-shadcn-ui/apps/v4/registry/new-york-v4/lib/ packages/ui/src/lib/ | tee rsync-lib.log
-            fi
-
-            # hooks 동기화
-            if [ -d tmp-shadcn-ui/apps/v4/registry/new-york-v4/hooks ]; then
-              echo "=== V4 New York 레지스트리 hooks 동기화 ==="
-              rsync -av $([[ "${{ steps.check-merge.outputs.force_sync }}" == "true" ]] && echo "--delete") \
-                tmp-shadcn-ui/apps/v4/registry/new-york-v4/hooks/ packages/ui/src/hooks/ | tee rsync-hooks.log
-            fi
-
-            # styles 동기화
-            if [ -d tmp-shadcn-ui/apps/v4/registry/new-york-v4/styles ]; then
-              echo "=== V4 New York 레지스트리 styles 동기화 ==="
-              rsync -av $([[ "${{ steps.check-merge.outputs.force_sync }}" == "true" ]] && echo "--delete") \
-                tmp-shadcn-ui/apps/v4/registry/new-york-v4/styles/ packages/ui/src/styles/ | tee rsync-styles.log
-            fi
-
-            # components.json 파일 동기화 (존재하는 경우)
-            if [ -f tmp-shadcn-ui/apps/v4/registry/new-york-v4/components.json ]; then
-              echo "=== V4 New York 레지스트리 components.json 동기화 ==="
-              cp tmp-shadcn-ui/apps/v4/registry/new-york-v4/components.json packages/ui/
-              # Tailwind CSS v4 호환성을 위해 tailwind.config 비움
-              jq '.tailwind.config = ""' packages/ui/components.json > packages/ui/components.json.tmp
-              mv packages/ui/components.json.tmp packages/ui/components.json
-            fi
-
-            # 강제로 변경사항 생성 (타임스탬프 파일)
-            echo "현재 동기화 시간: $(date)" > packages/ui/src/.sync-timestamp
-
-            # 변경사항이 있음을 표시
-            touch .sync-changes-detected
-          else
-            echo "ERROR: V4 registry components directory not found at apps/v4/registry/new-york-v4/ui"
-            exit 1
-          fi
+          # List copied files
+          echo "=== Copied components ==="
+          find packages/ui/src -type f | sort
 
       - name: Clean up temporary files
         run: rm -rf tmp-shadcn-ui
@@ -192,7 +139,7 @@ jobs:
           if [ -z "$git_status" ]; then
             echo "변경 사항이 없습니다. 가능한 문제:"
             echo "1. 소스 디렉토리에 파일이 없음"
-            echo "2. rsync 명령이 실패함"
+            echo "2. 파일 복사 명령이 실패함"
             echo "3. 이미 모든 파일이 최신 상태임"
 
             # 소스 디렉토리 확인
