@@ -10,13 +10,18 @@ on:
   workflow_dispatch: # 수동 실행 가능
   pull_request:
     types: [closed]
-    branches:
-      - main
 
 jobs:
   sync:
     runs-on: ubuntu-latest
-    if: github.event.pull_request.merged == true && (github.event.pull_request.head.ref == 'sync/shadcn-v4' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    if: |
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.merged == true &&
+       github.event.pull_request.head.ref == 'sync/shadcn-v4' &&
+       github.event.pull_request.base.ref == 'main')
+
     steps:
       - name: Checkout current repo
         uses: actions/checkout@v4
@@ -30,22 +35,13 @@ jobs:
 
       - name: Create and prepare sync branch
         run: |
-          # 기존 브랜치가 있는지 확인하고 생성
-          if git ls-remote --heads origin sync/shadcn-v4 | grep -q sync/shadcn-v4; then
-            echo "브랜치가 이미 존재합니다. 최신 main으로 재설정합니다."
-            git checkout main
-            git pull origin main
-            git checkout -B sync/shadcn-v4
-            git reset --hard main
-          else
-            echo "새로운 브랜치를 생성합니다."
-            git checkout -b sync/shadcn-v4
-          fi
+          git checkout -b sync/shadcn-v4 || git checkout sync/shadcn-v4
+          git reset --hard origin/main
 
-      - name: Set up dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y jq
+          sudo apt-get install -y jq rsync
 
       - name: Clone shadcn/ui v4
         run: git clone --depth=1 https://github.com/shadcn-ui/ui.git tmp-shadcn-ui
@@ -57,45 +53,18 @@ jobs:
           mkdir -p packages/ui/src/hooks
           mkdir -p packages/ui/src/styles
 
-      - name: Sync monorepo template
+      - name: Sync from monorepo template
         run: |
-          echo "monorepo 템플릿에서 파일 동기화 중..."
+          rsync -av --delete tmp-shadcn-ui/templates/monorepo-next/packages/ui/src/components/ packages/ui/src/components/
+          rsync -av --delete tmp-shadcn-ui/templates/monorepo-next/packages/ui/src/lib/ packages/ui/src/lib/
+          rsync -av --delete tmp-shadcn-ui/templates/monorepo-next/packages/ui/src/hooks/ packages/ui/src/hooks/
+          rsync -av --delete tmp-shadcn-ui/templates/monorepo-next/packages/ui/src/styles/ packages/ui/src/styles/
 
-          # 컴포넌트 동기화 (monorepo 템플릿)
-          if [ -d tmp-shadcn-ui/templates/monorepo-next/packages/ui/src/components ]; then
-            echo "✅ 템플릿에서 컴포넌트 복사 중..."
-            rsync -av --delete tmp-shadcn-ui/templates/monorepo-next/packages/ui/src/components/ packages/ui/src/components/
-          fi
-
-          # 유틸리티 동기화 (monorepo 템플릿)
-          if [ -d tmp-shadcn-ui/templates/monorepo-next/packages/ui/src/lib ]; then
-            echo "✅ 템플릿에서 유틸리티 복사 중..."
-            rsync -av --delete tmp-shadcn-ui/templates/monorepo-next/packages/ui/src/lib/ packages/ui/src/lib/
-          fi
-
-          # 훅 동기화 (monorepo 템플릿)
-          if [ -d tmp-shadcn-ui/templates/monorepo-next/packages/ui/src/hooks ]; then
-            echo "✅ 템플릿에서 훅 복사 중..."
-            rsync -av --delete tmp-shadcn-ui/templates/monorepo-next/packages/ui/src/hooks/ packages/ui/src/hooks/
-          fi
-
-          # 스타일 동기화 (monorepo 템플릿)
-          if [ -d tmp-shadcn-ui/templates/monorepo-next/packages/ui/src/styles ]; then
-            echo "✅ 템플릿에서 스타일 복사 중..."
-            rsync -av --delete tmp-shadcn-ui/templates/monorepo-next/packages/ui/src/styles/ packages/ui/src/styles/
-          fi
-
-      - name: Sync v4 app components
+      - name: Sync additional v4 components
         run: |
-          echo "v4 앱에서 추가 컴포넌트 동기화 중..."
-
-          # v4 앱에서 추가 컴포넌트를 찾아서 추가
           if [ -d tmp-shadcn-ui/apps/v4/components ]; then
-            echo "✅ v4 앱에서 컴포넌트 추가 중..."
             mkdir -p tmp-components
             rsync -av tmp-shadcn-ui/apps/v4/components/ tmp-components/
-
-            # 이미 존재하는 컴포넌트와 중복되지 않는 항목만 복사
             rsync -av --ignore-existing tmp-components/ packages/ui/src/components/
             rm -rf tmp-components
           fi
@@ -103,12 +72,7 @@ jobs:
       - name: Update components.json from template
         run: |
           if [ -f tmp-shadcn-ui/templates/monorepo-next/packages/ui/components.json ]; then
-            echo "✅ components.json 템플릿에서 복사 중..."
-
-            # components.json 템플릿 복사
             cp tmp-shadcn-ui/templates/monorepo-next/packages/ui/components.json packages/ui/
-
-            # Tailwind CSS v4 설정 적용
             jq '.tailwind.config = ""' packages/ui/components.json > packages/ui/components.json.tmp
             mv packages/ui/components.json.tmp packages/ui/components.json
           fi
@@ -116,13 +80,11 @@ jobs:
       - name: Update package.json dependencies
         run: |
           if [ -f tmp-shadcn-ui/templates/monorepo-next/packages/ui/package.json ]; then
-            echo "✅ package.json 템플릿에서 의존성 업데이트 중..."
-
             SOURCE_DEPS=$(jq -c '.dependencies // {}' tmp-shadcn-ui/templates/monorepo-next/packages/ui/package.json)
             SOURCE_PEER_DEPS=$(jq -c '.peerDependencies // {}' tmp-shadcn-ui/templates/monorepo-next/packages/ui/package.json)
-
-            # 현재 package.json 업데이트 - 의존성 병합 (오버라이드 없이)
-            jq --argjson srcDeps "$SOURCE_DEPS" --argjson srcPeerDeps "$SOURCE_PEER_DEPS" '.dependencies += $srcDeps | .peerDependencies += $srcPeerDeps' packages/ui/package.json > packages/ui/package.json.tmp
+            jq --argjson srcDeps "$SOURCE_DEPS" --argjson srcPeerDeps "$SOURCE_PEER_DEPS" \
+              '.dependencies += $srcDeps | .peerDependencies += $srcPeerDeps' \
+              packages/ui/package.json > packages/ui/package.json.tmp
             mv packages/ui/package.json.tmp packages/ui/package.json
           fi
 
