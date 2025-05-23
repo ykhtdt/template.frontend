@@ -2,6 +2,7 @@ name: Sync shadcn/ui v4 for Monorepo with Tailwind CSS v4
 
 permissions:
   contents: write
+  pull-requests: write
 
 on:
   schedule:
@@ -21,6 +22,27 @@ jobs:
     steps:
       - name: Checkout current repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create and prepare sync branch
+        run: |
+          # 기존 브랜치가 있는지 확인하고 생성
+          if git ls-remote --heads origin sync/shadcn-v4-monorepo | grep -q sync/shadcn-v4-monorepo; then
+            echo "브랜치가 이미 존재합니다. 최신 main으로 재설정합니다."
+            git checkout main
+            git pull origin main
+            git checkout -B sync/shadcn-v4-monorepo
+            git reset --hard main
+          else
+            echo "새로운 브랜치를 생성합니다."
+            git checkout -b sync/shadcn-v4-monorepo
+          fi
 
       - name: Set up dependencies
         run: |
@@ -114,6 +136,9 @@ jobs:
         run: |
           if [[ -n "$(git status --porcelain)" ]]; then
             echo "changes=true" >> $GITHUB_OUTPUT
+            git add .
+            git commit -m "chore: sync shadcn/ui v4 components for monorepo"
+            git push -f origin sync/shadcn-v4-monorepo
           else
             echo "changes=false" >> $GITHUB_OUTPUT
           fi
@@ -122,6 +147,7 @@ jobs:
         if: steps.check_changes.outputs.changes == 'true'
         uses: peter-evans/create-pull-request@v6
         with:
+          token: ${{ github.token }}
           commit-message: "chore: sync shadcn/ui v4 components for monorepo"
           title: "chore: sync shadcn/ui v4 components for monorepo"
           body: |
@@ -143,4 +169,5 @@ jobs:
 
             변경사항을 검토하고 필요한 경우 수정 후 머지해주세요.
           branch: "sync/shadcn-v4-monorepo"
+          base: "main"
           labels: "dependencies,ui,shadcn"
