@@ -204,6 +204,8 @@ jobs:
           delete-branch: false
 
       - name: PR Result
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           echo "Create PR 액션 결과: ${{ steps.create-pr.outputs.pull-request-number }}"
           if [ -n "${{ steps.create-pr.outputs.pull-request-number }}" ]; then
