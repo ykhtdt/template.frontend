@@ -29,6 +29,7 @@ jobs:
           echo "Event name: ${{ github.event_name }}"
           echo "Ref: ${{ github.ref }}"
           echo "Commit message: ${{ github.event.head_commit.message }}"
+          echo "날짜 및 시간: $(date)"
 
       - name: Checkout current repo
         uses: actions/checkout@v4
@@ -70,6 +71,19 @@ jobs:
           mkdir -p packages/ui/src/hooks
           mkdir -p packages/ui/src/styles
 
+      - name: Check if running after sync/shadcn-v4 merge
+        id: check-merge
+        run: |
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/main" &&
+                "${{ contains(github.event.head_commit.message, 'Merge pull request') }}" == "true" &&
+                "${{ contains(github.event.head_commit.message, 'sync/shadcn-v4') }}" == "true" ]]; then
+            echo "sync/shadcn-v4 브랜치가 main에 병합되었습니다. 모든 컴포넌트를 강제로 가져옵니다."
+            echo "force_sync=true" >> $GITHUB_OUTPUT
+          else
+            echo "일반적인 실행으로 계속합니다."
+            echo "force_sync=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Sync from v4 registry components
         run: |
           echo "Syncing components from v4 registry..."
@@ -77,25 +91,37 @@ jobs:
           # V4 New York 레지스트리 컴포넌트 동기화
           if [ -d tmp-shadcn-ui/apps/v4/registry/new-york-v4/ui ]; then
             echo "=== V4 New York 레지스트리 컴포넌트 동기화 ==="
-            rsync -av --exclude="*-demo.tsx" --exclude="*.stories.tsx" --exclude="*.test.tsx" \
-              tmp-shadcn-ui/apps/v4/registry/new-york-v4/ui/ packages/ui/src/components/ | tee rsync-components.log
+
+            # force_sync가 true인 경우 --delete 옵션 추가하여 기존 파일을 덮어쓰기
+            if [[ "${{ steps.check-merge.outputs.force_sync }}" == "true" ]]; then
+              echo "모든 컴포넌트를 강제로 동기화합니다. 기존 파일을 덮어씁니다."
+              rsync -av --delete --exclude="*-demo.tsx" --exclude="*.stories.tsx" --exclude="*.test.tsx" \
+                tmp-shadcn-ui/apps/v4/registry/new-york-v4/ui/ packages/ui/src/components/ | tee rsync-components.log
+            else
+              # 일반 동기화 - 기존 파일 보존
+              rsync -av --exclude="*-demo.tsx" --exclude="*.stories.tsx" --exclude="*.test.tsx" \
+                tmp-shadcn-ui/apps/v4/registry/new-york-v4/ui/ packages/ui/src/components/ | tee rsync-components.log
+            fi
 
             # utils, lib 동기화
             if [ -d tmp-shadcn-ui/apps/v4/registry/new-york-v4/lib ]; then
               echo "=== V4 New York 레지스트리 lib 동기화 ==="
-              rsync -av tmp-shadcn-ui/apps/v4/registry/new-york-v4/lib/ packages/ui/src/lib/ | tee rsync-lib.log
+              rsync -av $([[ "${{ steps.check-merge.outputs.force_sync }}" == "true" ]] && echo "--delete") \
+                tmp-shadcn-ui/apps/v4/registry/new-york-v4/lib/ packages/ui/src/lib/ | tee rsync-lib.log
             fi
 
             # hooks 동기화
             if [ -d tmp-shadcn-ui/apps/v4/registry/new-york-v4/hooks ]; then
               echo "=== V4 New York 레지스트리 hooks 동기화 ==="
-              rsync -av tmp-shadcn-ui/apps/v4/registry/new-york-v4/hooks/ packages/ui/src/hooks/ | tee rsync-hooks.log
+              rsync -av $([[ "${{ steps.check-merge.outputs.force_sync }}" == "true" ]] && echo "--delete") \
+                tmp-shadcn-ui/apps/v4/registry/new-york-v4/hooks/ packages/ui/src/hooks/ | tee rsync-hooks.log
             fi
 
             # styles 동기화
             if [ -d tmp-shadcn-ui/apps/v4/registry/new-york-v4/styles ]; then
               echo "=== V4 New York 레지스트리 styles 동기화 ==="
-              rsync -av tmp-shadcn-ui/apps/v4/registry/new-york-v4/styles/ packages/ui/src/styles/ | tee rsync-styles.log
+              rsync -av $([[ "${{ steps.check-merge.outputs.force_sync }}" == "true" ]] && echo "--delete") \
+                tmp-shadcn-ui/apps/v4/registry/new-york-v4/styles/ packages/ui/src/styles/ | tee rsync-styles.log
             fi
 
             # components.json 파일 동기화 (존재하는 경우)
@@ -107,6 +133,9 @@ jobs:
               mv packages/ui/components.json.tmp packages/ui/components.json
             fi
 
+            # 강제로 변경사항 생성 (타임스탬프 파일)
+            echo "현재 동기화 시간: $(date)" > packages/ui/src/.sync-timestamp
+
             # 변경사항이 있음을 표시
             touch .sync-changes-detected
           else
@@ -117,6 +146,19 @@ jobs:
       - name: Clean up temporary files
         run: rm -rf tmp-shadcn-ui
 
+      - name: Install GitHub CLI
+        run: |
+          if ! command -v gh &> /dev/null; then
+            echo "Installing GitHub CLI..."
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+            sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            sudo apt update
+            sudo apt install gh
+          else
+            echo "GitHub CLI already installed"
+          fi
+
       - name: Check for changes
         id: check_changes
         run: |
@@ -124,28 +166,16 @@ jobs:
           git_status=$(git status --porcelain)
           echo "Git status output: $git_status"
 
-          # 변경사항 감지 파일 확인
-          if [[ -f ".sync-changes-detected" ]] || [[ -n "$git_status" ]]; then
-            echo "Changes detected, preparing commit..."
-
-            # 변경사항이 없는 경우에도 커밋을 생성하기 위한 빈 파일 생성
-            if [[ -z "$git_status" ]]; then
-              echo "Git status is empty, creating a dummy change for testing"
-              echo "Last sync: $(date)" > packages/ui/src/.sync-timestamp
-            fi
-
-            echo "changes=true" >> $GITHUB_OUTPUT
-            git add .
-            git commit -m "chore: sync shadcn/ui v4 components for monorepo"
-            git push -f origin sync/shadcn-v4-monorepo
-            echo "Changes pushed to sync/shadcn-v4-monorepo branch"
-          else
-            echo "No changes detected."
-            echo "changes=false" >> $GITHUB_OUTPUT
-          fi
+          # 항상 PR 생성을 위해 변경사항을 만듦
+          echo "changes=true" >> $GITHUB_OUTPUT
+          git add .
+          git commit -m "chore: sync shadcn/ui v4 components for monorepo"
+          git push -f origin sync/shadcn-v4-monorepo
+          echo "Changes pushed to sync/shadcn-v4-monorepo branch"
 
       - name: Create Pull Request
         if: steps.check_changes.outputs.changes == 'true'
+        id: create-pr
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ github.token }}
@@ -161,7 +191,6 @@ jobs:
             - 유틸리티 (`/src/lib/`)
             - 훅 (`/src/hooks/`)
             - 스타일 (`/src/styles/`)
-            - 의존성 (`package.json`)
             - 설정 (`components.json`)
 
             ## Tailwind CSS v4 호환성
@@ -172,8 +201,29 @@ jobs:
           branch: "sync/shadcn-v4-monorepo"
           base: "main"
           labels: "dependencies,ui,shadcn"
+          delete-branch: false
 
       - name: PR Result
-        if: steps.check_changes.outputs.changes == 'true'
         run: |
-          echo "Pull Request 생성됨: sync/shadcn-v4-monorepo → main"
+          echo "Create PR 액션 결과: ${{ steps.create-pr.outputs.pull-request-number }}"
+          if [ -n "${{ steps.create-pr.outputs.pull-request-number }}" ]; then
+            echo "Pull Request 생성됨: sync/shadcn-v4-monorepo → main (PR #${{ steps.create-pr.outputs.pull-request-number }})"
+            echo "PR URL: ${{ steps.create-pr.outputs.pull-request-url }}"
+          else
+            echo "PR이 생성되지 않았습니다. 가능한 원인:"
+            echo "1. 이미 동일한 내용의 PR이 존재"
+            echo "2. 브랜치 간에 차이가 없음"
+            echo "3. 토큰 권한 문제"
+
+            # 기존 PR 확인
+            echo "기존 PR 확인 중..."
+            EXISTING_PR=$(gh pr list --base main --head sync/shadcn-v4-monorepo --json number,url --jq '.[0]')
+            if [ -n "$EXISTING_PR" ]; then
+              echo "기존 PR이 발견되었습니다: $EXISTING_PR"
+            fi
+
+            # 브랜치 차이 확인
+            echo "브랜치 차이 확인 중..."
+            DIFF_COUNT=$(git diff origin/main..sync/shadcn-v4-monorepo --name-only | wc -l)
+            echo "브랜치 간 변경된 파일 수: $DIFF_COUNT"
+          fi
