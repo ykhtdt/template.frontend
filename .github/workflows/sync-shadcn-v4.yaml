@@ -6,14 +6,12 @@ permissions:
 
 on:
   schedule:
-    - cron: "0 0 * * 1"
-  workflow_dispatch:
+    - cron: "0 0 * * 1" # 매주 월요일 자정에 실행
+  workflow_dispatch: # 수동 실행 가능
   pull_request:
     types: [closed]
     branches:
       - main
-    paths:
-      - ".github/workflows/sync-shadcn-v4.yaml"
 
 jobs:
   sync:
@@ -33,15 +31,15 @@ jobs:
       - name: Create and prepare sync branch
         run: |
           # 기존 브랜치가 있는지 확인하고 생성
-          if git ls-remote --heads origin sync/shadcn-v4-monorepo | grep -q sync/shadcn-v4-monorepo; then
+          if git ls-remote --heads origin sync/shadcn-v4 | grep -q sync/shadcn-v4; then
             echo "브랜치가 이미 존재합니다. 최신 main으로 재설정합니다."
             git checkout main
             git pull origin main
-            git checkout -B sync/shadcn-v4-monorepo
+            git checkout -B sync/shadcn-v4
             git reset --hard main
           else
             echo "새로운 브랜치를 생성합니다."
-            git checkout -b sync/shadcn-v4-monorepo
+            git checkout -b sync/shadcn-v4
           fi
 
       - name: Set up dependencies
@@ -138,7 +136,7 @@ jobs:
             echo "changes=true" >> $GITHUB_OUTPUT
             git add .
             git commit -m "chore: sync shadcn/ui v4 components for monorepo"
-            git push -f origin sync/shadcn-v4-monorepo
+            git push -f origin sync/shadcn-v4
           else
             echo "changes=false" >> $GITHUB_OUTPUT
           fi
@@ -168,6 +166,6 @@ jobs:
             이 PR은 Tailwind CSS v4와 호환되도록 업데이트되었습니다.
 
             변경사항을 검토하고 필요한 경우 수정 후 머지해주세요.
-          branch: "sync/shadcn-v4-monorepo"
+          branch: "sync/shadcn-v4"
           base: "main"
           labels: "dependencies,ui,shadcn"
