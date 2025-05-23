@@ -8,8 +8,9 @@ on:
   schedule:
     - cron: "0 0 * * 1" # 매주 월요일 자정에 실행
   workflow_dispatch: # 수동 실행 가능
-  pull_request:
-    types: [closed]
+  push:
+    branches:
+      - main
 
 jobs:
   sync:
@@ -17,10 +18,10 @@ jobs:
     if: |
       github.event_name == 'schedule' ||
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' &&
-       github.event.pull_request.merged == true &&
-       github.event.pull_request.head.ref == 'sync/shadcn-v4' &&
-       github.event.pull_request.base.ref == 'main')
+      (github.event_name == 'push' &&
+       github.ref == 'refs/heads/main' &&
+       contains(github.event.head_commit.message, 'Merge pull request') &&
+       contains(github.event.head_commit.message, 'sync/shadcn-v4'))
 
     steps:
       - name: Checkout current repo
