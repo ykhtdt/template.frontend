@@ -6,8 +6,8 @@ permissions:
 
 on:
   schedule:
-    - cron: "0 0 * * 1" # 매주 월요일 자정에 실행
-  workflow_dispatch: # 수동 실행 가능
+    - cron: "0 0 * * 1"
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -20,17 +20,10 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' &&
        github.ref == 'refs/heads/main' &&
-       (contains(github.event.head_commit.message, 'Merge pull request') &&
-        contains(github.event.head_commit.message, 'sync/shadcn-v4')))
+       contains(github.event.head_commit.message, 'Merge pull request') &&
+       contains(github.event.head_commit.message, 'sync/shadcn-v4'))
 
     steps:
-      - name: Debug Event Information
-        run: |
-          echo "Event name: ${{ github.event_name }}"
-          echo "Ref: ${{ github.ref }}"
-          echo "Commit message: ${{ github.event.head_commit.message }}"
-          echo "날짜 및 시간: $(date)"
-
       - name: Checkout current repo
         uses: actions/checkout@v4
         with:
@@ -43,9 +36,7 @@ jobs:
 
       - name: Create and prepare sync branch
         run: |
-          git checkout -b sync/shadcn-v4-monorepo || git checkout sync/shadcn-v4-monorepo
-          git reset --hard origin/main
-          echo "현재 브랜치: $(git branch --show-current)"
+          git checkout -B sync/shadcn-v4-monorepo origin/main
 
       - name: Install dependencies
         run: |
@@ -55,122 +46,31 @@ jobs:
       - name: Clone shadcn/ui v4
         run: git clone --depth=1 https://github.com/shadcn-ui/ui.git tmp-shadcn-ui
 
-      - name: Debug Directory Structure
-        run: |
-          echo "========== Repository Structure =========="
-          ls -la
-          echo "========== packages/ui Structure =========="
-          ls -la packages/ui/src || echo "packages/ui/src directory does not exist yet"
-          echo "========== shadcn v4 registry components =========="
-          ls -la tmp-shadcn-ui/apps/v4/registry/new-york-v4/ui || echo "V4 registry components directory does not exist"
-
-      - name: Create required directories
-        run: |
-          mkdir -p packages/ui/src/components
-          mkdir -p packages/ui/src/lib
-          mkdir -p packages/ui/src/hooks
-          mkdir -p packages/ui/src/styles
-
-      - name: Check if running after sync/shadcn-v4 merge
-        id: check-merge
-        run: |
-          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/main" &&
-                "${{ contains(github.event.head_commit.message, 'Merge pull request') }}" == "true" &&
-                "${{ contains(github.event.head_commit.message, 'sync/shadcn-v4') }}" == "true" ]]; then
-            echo "sync/shadcn-v4 브랜치가 main에 병합되었습니다. 모든 컴포넌트를 강제로 가져옵니다."
-            echo "force_sync=true" >> $GITHUB_OUTPUT
-          else
-            echo "일반적인 실행으로 계속합니다."
-            echo "force_sync=false" >> $GITHUB_OUTPUT
-          fi
-
       - name: Copy components
         run: |
-          echo "Copying components from v4 registry..."
-          # Create target directories
-          mkdir -p packages/ui/src/components
-          mkdir -p packages/ui/src/lib
-          mkdir -p packages/ui/src/hooks
-          mkdir -p packages/ui/src/styles
-
-          # Force remove existing files if force_sync is true
-          if [[ "${{ steps.check-merge.outputs.force_sync }}" == "true" ]]; then
-            echo "Forcing sync - removing existing files"
-            rm -rf packages/ui/src/components/*
-            rm -rf packages/ui/src/lib/*
-            rm -rf packages/ui/src/hooks/*
-            rm -rf packages/ui/src/styles/*
-          fi
-
-          # Copy files using cp
-          cp -r tmp-shadcn-ui/apps/v4/registry/new-york-v4/ui/* packages/ui/src/components/
-          cp -r tmp-shadcn-ui/apps/v4/registry/new-york-v4/lib/* packages/ui/src/lib/ 2>/dev/null || echo "No lib files to copy"
-          cp -r tmp-shadcn-ui/apps/v4/registry/new-york-v4/hooks/* packages/ui/src/hooks/ 2>/dev/null || echo "No hooks files to copy"
-          cp -r tmp-shadcn-ui/apps/v4/registry/new-york-v4/styles/* packages/ui/src/styles/ 2>/dev/null || echo "No styles files to copy"
-
-          # List copied files
-          echo "=== Copied components ==="
-          find packages/ui/src -type f | sort
+          mkdir -p packages/ui/src/{components,lib,hooks,styles}
+          cp -r tmp-shadcn-ui/apps/v4/registry/new-york-v4/ui/* packages/ui/src/components/ || true
+          cp -r tmp-shadcn-ui/apps/v4/registry/new-york-v4/lib/* packages/ui/src/lib/ 2>/dev/null || true
+          cp -r tmp-shadcn-ui/apps/v4/registry/new-york-v4/hooks/* packages/ui/src/hooks/ 2>/dev/null || true
+          cp -r tmp-shadcn-ui/apps/v4/registry/new-york-v4/styles/* packages/ui/src/styles/ 2>/dev/null || true
 
       - name: Clean up temporary files
         run: rm -rf tmp-shadcn-ui
 
-      - name: Install GitHub CLI
+      - name: Check for changes and push
+        id: changes
         run: |
-          if ! command -v gh &> /dev/null; then
-            echo "Installing GitHub CLI..."
-            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-            sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
-            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-            sudo apt update
-            sudo apt install gh
+          if git diff --quiet; then
+            echo "No changes detected"
+            echo "changes=false" >> $GITHUB_OUTPUT
           else
-            echo "GitHub CLI already installed"
-          fi
-
-      - name: Check for changes
-        id: check_changes
-        run: |
-          echo "Checking for changes..."
-          git_status=$(git status --porcelain)
-          echo "Git status output: $git_status"
-
-          # 변경 사항 확인
-          if [ -z "$git_status" ]; then
-            echo "변경 사항이 없습니다. 가능한 문제:"
-            echo "1. 소스 디렉토리에 파일이 없음"
-            echo "2. 파일 복사 명령이 실패함"
-            echo "3. 이미 모든 파일이 최신 상태임"
-
-            # 소스 디렉토리 확인
-            echo "소스 디렉토리 확인:"
-            find tmp-shadcn-ui -name "*.tsx" | head -5 || echo "소스 파일을 찾을 수 없습니다."
-
-            # 대상 디렉토리 확인
-            echo "대상 디렉토리 확인:"
-            find packages/ui/src -type f | head -5 || echo "대상 디렉토리에 파일이 없습니다."
-
-            # 강제로 변경사항 생성
-            echo "변경 사항이 없어 강제로 변경사항 생성"
-            echo "# Shadcn UI V4 Sync - $(date)" >> README.md
-            git_status="README.md"
-          fi
-
-          # 항상 PR 생성을 위해 변경사항을 만듦
-          echo "changes=true" >> $GITHUB_OUTPUT
-          git add .
-          git commit -m "chore: sync shadcn/ui v4 components for monorepo"
-
-          # GitHub 토큰 설정
-          git config --local http.https://github.com/.extraheader "AUTHORIZATION: basic $(echo -n "x-access-token:${PERSONAL_ACCESS_TOKEN}" | base64)"
-          git push -f origin sync/shadcn-v4-monorepo
-          echo "Changes pushed to sync/shadcn-v4-monorepo branch"
-        env:
-          PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+            git add .
+            git commit -m "chore: sync shadcn/ui v4 components for monorepo"
+            git push -f origin sync/shadcn-v4-monorepo
+            echo "changes=true" >> $GITHUB_OUTPUT
 
       - name: Create Pull Request
-        if: steps.check_changes.outputs.changes == 'true'
-        id: create-pr
+        if: steps.changes.outputs.changes == 'true'
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
@@ -186,47 +86,13 @@ jobs:
             - 유틸리티 (`/src/lib/`)
             - 훅 (`/src/hooks/`)
             - 스타일 (`/src/styles/`)
-            - 설정 (`components.json`)
 
             ## Tailwind CSS v4 호환성
 
             이 PR은 Tailwind CSS v4와 호환되도록 업데이트되었습니다.
 
             변경사항을 검토하고 필요한 경우 수정 후 머지해주세요.
-          branch: "sync/shadcn-v4-monorepo"
-          base: "main"
-          labels: "dependencies,ui,shadcn"
+          branch: sync/shadcn-v4-monorepo
+          base: main
+          labels: dependencies,ui,shadcn
           delete-branch: false
-
-      - name: PR Result
-        env:
-          GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
-        run: |
-          echo "Create PR 액션 결과: ${{ steps.create-pr.outputs.pull-request-number }}"
-          if [ -n "${{ steps.create-pr.outputs.pull-request-number }}" ]; then
-            echo "Pull Request 생성됨: sync/shadcn-v4-monorepo → main (PR #${{ steps.create-pr.outputs.pull-request-number }})"
-            echo "PR URL: ${{ steps.create-pr.outputs.pull-request-url }}"
-          else
-            echo "PR이 생성되지 않았습니다. 가능한 원인:"
-            echo "1. 이미 동일한 내용의 PR이 존재"
-            echo "2. 브랜치 간에 차이가 없음"
-            echo "3. 토큰 권한 문제"
-
-            # 기존 PR 확인
-            echo "기존 PR 확인 중..."
-            EXISTING_PR=$(gh pr list --base main --head sync/shadcn-v4-monorepo --json number,url --jq '.[0]')
-            if [ -n "$EXISTING_PR" ]; then
-              echo "기존 PR이 발견되었습니다: $EXISTING_PR"
-            fi
-
-            # 브랜치 차이 확인
-            echo "브랜치 차이 확인 중..."
-            DIFF_COUNT=$(git diff origin/main..sync/shadcn-v4-monorepo --name-only | wc -l)
-            echo "브랜치 간 변경된 파일 수: $DIFF_COUNT"
-          fi
-
-      - name: Push changes again to ensure
-        env:
-          GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
-        run: |
-          git push -f origin sync/shadcn-v4-monorepo
