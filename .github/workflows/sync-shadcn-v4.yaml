@@ -88,6 +88,17 @@ jobs:
         run: |
           echo "Syncing components from v4 registry..."
 
+          # V4 레지스트리 존재 확인
+          if [ ! -d "tmp-shadcn-ui" ]; then
+            echo "ERROR: tmp-shadcn-ui 디렉토리가 존재하지 않습니다."
+            exit 1
+          fi
+
+          # 디렉토리 구조 디버깅
+          echo "=== 디렉토리 구조 확인 ==="
+          ls -la tmp-shadcn-ui
+          ls -la tmp-shadcn-ui/apps/v4/registry || echo "V4 registry path does not exist"
+
           # V4 New York 레지스트리 컴포넌트 동기화
           if [ -d tmp-shadcn-ui/apps/v4/registry/new-york-v4/ui ]; then
             echo "=== V4 New York 레지스트리 컴포넌트 동기화 ==="
@@ -102,6 +113,17 @@ jobs:
               rsync -av --exclude="*-demo.tsx" --exclude="*.stories.tsx" --exclude="*.test.tsx" \
                 tmp-shadcn-ui/apps/v4/registry/new-york-v4/ui/ packages/ui/src/components/ | tee rsync-components.log
             fi
+
+            # rsync 결과 확인
+            if [ $? -ne 0 ]; then
+              echo "RSYNC ERROR: 컴포넌트 동기화 중 오류가 발생했습니다."
+              cat rsync-components.log
+              exit 1
+            fi
+
+            # 동기화 결과 확인
+            echo "=== 동기화 결과 확인 ==="
+            ls -la packages/ui/src/components/ || echo "컴포넌트 디렉토리가 존재하지 않습니다."
 
             # utils, lib 동기화
             if [ -d tmp-shadcn-ui/apps/v4/registry/new-york-v4/lib ]; then
@@ -165,6 +187,27 @@ jobs:
           echo "Checking for changes..."
           git_status=$(git status --porcelain)
           echo "Git status output: $git_status"
+
+          # 변경 사항 확인
+          if [ -z "$git_status" ]; then
+            echo "변경 사항이 없습니다. 가능한 문제:"
+            echo "1. 소스 디렉토리에 파일이 없음"
+            echo "2. rsync 명령이 실패함"
+            echo "3. 이미 모든 파일이 최신 상태임"
+
+            # 소스 디렉토리 확인
+            echo "소스 디렉토리 확인:"
+            find tmp-shadcn-ui -name "*.tsx" | head -5 || echo "소스 파일을 찾을 수 없습니다."
+
+            # 대상 디렉토리 확인
+            echo "대상 디렉토리 확인:"
+            find packages/ui/src -type f | head -5 || echo "대상 디렉토리에 파일이 없습니다."
+
+            # 강제로 변경사항 생성
+            echo "변경 사항이 없어 강제로 변경사항 생성"
+            echo "# Shadcn UI V4 Sync - $(date)" >> README.md
+            git_status="README.md"
+          fi
 
           # 항상 PR 생성을 위해 변경사항을 만듦
           echo "changes=true" >> $GITHUB_OUTPUT
