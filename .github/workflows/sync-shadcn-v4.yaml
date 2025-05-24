@@ -150,6 +150,21 @@ jobs:
           else
             echo "Changes detected"
             echo "changes=true" >> $GITHUB_OUTPUT
+
+            # 변경된 파일 목록 가져오기
+            CHANGED_FILES=$(git diff --name-only --staged || git diff --name-only)
+            echo "Changed files:"
+            echo "$CHANGED_FILES"
+
+            # 실제 코드 파일(md 파일 제외)이 변경되었는지 확인
+            NON_MD_CHANGES=$(echo "$CHANGED_FILES" | grep -v "\.md$" || true)
+            if [ -z "$NON_MD_CHANGES" ]; then
+              echo "Only markdown files changed"
+              echo "only_md_changes=true" >> $GITHUB_OUTPUT
+            else
+              echo "Code files changed"
+              echo "only_md_changes=false" >> $GITHUB_OUTPUT
+            fi
           fi
 
       - name: Commit and push changes
@@ -174,6 +189,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BRANCH_NAME: ${{ steps.branch.outputs.branch_name }}
+          ONLY_MD_CHANGES: ${{ steps.changes.outputs.only_md_changes }}
         run: |
           TITLE="chore: sync shadcn/ui v4 components for monorepo [$(date +%Y-%m-%d) UTC]"
 
@@ -184,11 +200,28 @@ jobs:
           # PR 본문 생성
           echo "Creating PR body file..."
           PR_BODY_FILE=$(mktemp)
+
+          # 변경 내용 알림 메시지 작성
+          if [ "$ONLY_MD_CHANGES" = "true" ]; then
+            NOTICE_MSG=$(cat << EON
+
+          ## ⚠️ 변경된 코드 파일 없음 ⚠️
+
+          **이 PR에는 실제 코드 변경사항이 없습니다. 타임스탬프 파일만 업데이트되었습니다.**
+
+          현재 shadcn/ui v4와 이미 동기화된 상태입니다.
+
+          EON
+          )
+          else
+            NOTICE_MSG=""
+          fi
+
           cat > "$PR_BODY_FILE" << EOL
           # shadcn/ui v4 컴포넌트 동기화
 
           이 PR은 shadcn/ui v4의 monorepo 템플릿에서 컴포넌트, 유틸리티, 훅, 스타일을 동기화합니다.
-
+          $NOTICE_MSG
           ## 동기화된 항목
           - 컴포넌트 (\`/src/components/\`)
           - 유틸리티 (\`/src/lib/\`)
@@ -216,7 +249,13 @@ jobs:
 
             # PR 생성 후 별도로 라벨 추가 시도 (실패해도 워크플로우 계속 진행)
             echo "Trying to add labels..."
-            gh pr edit "$BRANCH_NAME" --add-label "enhancement" || echo "Could not add enhancement label, continuing..."
+            if [ "$ONLY_MD_CHANGES" = "true" ]; then
+              # 변경 없음 라벨 추가
+              gh pr edit "$BRANCH_NAME" --add-label "no-code-changes" || echo "Could not add no-code-changes label, continuing..."
+            else
+              # 일반 라벨 추가
+              gh pr edit "$BRANCH_NAME" --add-label "enhancement" || echo "Could not add enhancement label, continuing..."
+            fi
           else
             echo "Failed to create PR"
             exit 1
