@@ -35,14 +35,22 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Create and prepare sync branch
-        run: |
-          git checkout -b sync/shadcn-v4-monorepo-$(date +%Y%m%d%H%M%S) origin/main
-
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y jq
+
+      - name: Generate unique branch name
+        id: branch
+        run: |
+          # 고유한 타임스탬프 생성
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          BRANCH_NAME="sync/shadcn-ui-v4-$TIMESTAMP"
+          echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          echo "Using branch name: $BRANCH_NAME"
+
+          # 새 브랜치 생성
+          git checkout -b "$BRANCH_NAME" origin/main
 
       - name: Clone shadcn/ui v4
         run: git clone --depth=1 https://github.com/shadcn-ui/ui.git tmp-shadcn-ui
@@ -116,79 +124,92 @@ jobs:
 
       - name: Add timestamp to ensure differences
         run: |
+          # 타임스탬프를 포함한 파일 생성으로 항상 main과 차이가 있도록 보장
           TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
           echo "# shadcn/ui v4 sync timestamp: $TIMESTAMP" > packages/ui/src/SYNC_TIMESTAMP.md
           echo "Last synced from shadcn/ui v4 on $TIMESTAMP" >> packages/ui/src/SYNC_TIMESTAMP.md
+          echo "Repository: https://github.com/shadcn-ui/ui" >> packages/ui/src/SYNC_TIMESTAMP.md
+          echo "Sync workflow run: $GITHUB_RUN_ID" >> packages/ui/src/SYNC_TIMESTAMP.md
 
       - name: Clean up temporary files
         run: rm -rf tmp-shadcn-ui
 
-      - name: Check for changes and push
+      - name: Check for changes
         id: changes
         run: |
           git status
+          # Check if there's anything to commit
           if [ -z "$(git status --porcelain)" ]; then
             echo "No changes detected"
             echo "changes=false" >> $GITHUB_OUTPUT
           else
-            echo "Changes detected, committing..."
-            git add .
-            CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-            git commit -m "chore: sync shadcn/ui v4 components for monorepo [$(date +%Y-%m-%d)]"
-
-            echo "Pushing changes to $CURRENT_BRANCH branch..."
-            if git push -f origin $CURRENT_BRANCH; then
-              echo "Push successful"
-              echo "branch_name=$CURRENT_BRANCH" >> $GITHUB_OUTPUT
-              echo "changes=true" >> $GITHUB_OUTPUT
-            else
-              echo "Push failed, checking errors..."
-              git remote -v
-              git branch -a
-              echo "::error::Failed to push changes to remote repository"
-              exit 1
-            fi
+            echo "Changes detected"
+            echo "changes=true" >> $GITHUB_OUTPUT
           fi
 
-      - name: Verify branch exists
+      - name: Commit and push changes
         if: steps.changes.outputs.changes == 'true'
         run: |
-          BRANCH_NAME="${{ steps.changes.outputs.branch_name }}"
-          echo "Verifying branch $BRANCH_NAME exists in remote..."
-          git fetch
-          if git branch -r | grep -q "origin/$BRANCH_NAME"; then
-            echo "Branch exists in remote repository"
+          BRANCH_NAME="${{ steps.branch.outputs.branch_name }}"
+          TIMESTAMP=$(date +"%Y-%m-%d")
+
+          git add .
+          git commit -m "chore: sync shadcn/ui v4 components for monorepo [$TIMESTAMP]"
+
+          echo "Pushing changes to $BRANCH_NAME branch..."
+          if git push -u origin "$BRANCH_NAME"; then
+            echo "Push successful"
           else
-            echo "::error::Branch not found in remote after push"
+            echo "Push failed"
             exit 1
           fi
 
+      - name: Install GitHub CLI
+        if: steps.changes.outputs.changes == 'true'
+        run: |
+          type -p curl >/dev/null || sudo apt install curl -y
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+          && sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+          && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+          && sudo apt update \
+          && sudo apt install gh -y
+
       - name: Create Pull Request
         if: steps.changes.outputs.changes == 'true'
-        uses: peter-evans/create-pull-request@v6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "chore: sync shadcn/ui v4 components for monorepo"
-          title: "chore: sync shadcn/ui v4 components for monorepo [$(date +%Y-%m-%d)]"
-          body: |
-            # shadcn/ui v4 컴포넌트 동기화
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH_NAME: ${{ steps.branch.outputs.branch_name }}
+        run: |
+          TITLE="chore: sync shadcn/ui v4 components for monorepo [$(date +%Y-%m-%d)]"
+          BODY=$(cat <<EOF
+# shadcn/ui v4 컴포넌트 동기화
 
-            이 PR은 shadcn/ui v4의 monorepo 템플릿에서 컴포넌트, 유틸리티, 훅, 스타일을 동기화합니다.
+이 PR은 shadcn/ui v4의 monorepo 템플릿에서 컴포넌트, 유틸리티, 훅, 스타일을 동기화합니다.
 
-            ## 동기화된 항목
-            - 컴포넌트 (`/src/components/`)
-            - 유틸리티 (`/src/lib/`)
-            - 훅 (`/src/hooks/`)
-            - 스타일 (`/src/styles/`)
+## 동기화된 항목
+- 컴포넌트 (\`/src/components/\`)
+- 유틸리티 (\`/src/lib/\`)
+- 훅 (\`/src/hooks/\`)
+- 스타일 (\`/src/styles/\`)
 
-            ## Tailwind CSS v4 호환성
+## Tailwind CSS v4 호환성
 
-            이 PR은 Tailwind CSS v4와 호환되도록 업데이트되었습니다.
+이 PR은 Tailwind CSS v4와 호환되도록 업데이트되었습니다.
 
-            변경사항을 검토하고 필요한 경우 수정 후 머지해주세요.
+변경사항을 검토하고 필요한 경우 수정 후 머지해주세요.
 
-            동기화 타임스탬프: $(date +"%Y-%m-%d %H:%M:%S")
-          branch: ${{ steps.changes.outputs.branch_name }}
-          base: main
-          labels: dependencies,ui,shadcn
-          delete-branch: true
+동기화 타임스탬프: $(date +"%Y-%m-%d %H:%M:%S")
+워크플로우 실행 ID: ${GITHUB_RUN_ID}
+EOF
+)
+
+          echo "Creating PR from branch $BRANCH_NAME to main..."
+          PR_URL=$(gh pr create --base main --head "$BRANCH_NAME" --title "$TITLE" --body "$BODY" --label "dependencies,ui,shadcn")
+
+          if [ $? -eq 0 ]; then
+            echo "PR created successfully: $PR_URL"
+            echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+          else
+            echo "Failed to create PR"
+            exit 1
+          fi
