@@ -207,11 +207,17 @@ jobs:
           EOL
 
           echo "Creating PR from branch $BRANCH_NAME to main..."
-          PR_URL=$(gh pr create --base main --head "$BRANCH_NAME" --title "$TITLE" --body-file "$PR_BODY_FILE" --label "dependencies,ui,shadcn")
+
+          # 라벨 없이 PR 생성 (라벨 오류 회피)
+          PR_URL=$(gh pr create --base main --head "$BRANCH_NAME" --title "$TITLE" --body-file "$PR_BODY_FILE")
 
           if [ $? -eq 0 ]; then
             echo "PR created successfully: $PR_URL"
             echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+
+            # 라벨 추가 시도 (실패해도 계속 진행)
+            echo "Trying to add labels..."
+            gh pr edit "$BRANCH_NAME" --add-label "enhancement" || echo "Could not add enhancement label, continuing..."
           else
             echo "Failed to create PR"
             exit 1
