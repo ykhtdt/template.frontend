@@ -35,10 +35,15 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
+      - name: Setup GitHub CLI
+        run: |
+          echo "GitHub CLI version: $(gh --version | head -n 1)"
+          echo "Using pre-installed GitHub CLI"
+
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y jq
+          sudo apt-get update -qq
+          sudo apt-get install -qq -y jq
 
       - name: Generate unique branch name
         id: branch
@@ -145,6 +150,21 @@ jobs:
           else
             echo "Changes detected"
             echo "changes=true" >> $GITHUB_OUTPUT
+
+            # 변경된 파일 목록 가져오기
+            CHANGED_FILES=$(git diff --name-only --staged || git diff --name-only)
+            echo "Changed files:"
+            echo "$CHANGED_FILES"
+
+            # 실제 코드 파일(md 파일 제외)이 변경되었는지 확인
+            NON_MD_CHANGES=$(echo "$CHANGED_FILES" | grep -v "\.md$" || true)
+            if [ -z "$NON_MD_CHANGES" ]; then
+              echo "Only markdown files changed"
+              echo "only_md_changes=true" >> $GITHUB_OUTPUT
+            else
+              echo "Code files changed"
+              echo "only_md_changes=false" >> $GITHUB_OUTPUT
+            fi
           fi
 
       - name: Commit and push changes
@@ -164,32 +184,44 @@ jobs:
             exit 1
           fi
 
-      - name: Install GitHub CLI
-        if: steps.changes.outputs.changes == 'true'
-        run: |
-          type -p curl >/dev/null || sudo apt install curl -y
-          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
-          && sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
-          && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-          && sudo apt update \
-          && sudo apt install gh -y
-
       - name: Create Pull Request
         if: steps.changes.outputs.changes == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BRANCH_NAME: ${{ steps.branch.outputs.branch_name }}
+          ONLY_MD_CHANGES: ${{ steps.changes.outputs.only_md_changes }}
         run: |
           TITLE="chore: sync shadcn/ui v4 components for monorepo [$(date +%Y-%m-%d) UTC]"
+
+          # 저장소 소유자 정보 가져오기
+          REPO_OWNER=$(gh repo view --json owner -q .owner.login)
+          echo "Repository owner: $REPO_OWNER"
 
           # PR 본문 생성
           echo "Creating PR body file..."
           PR_BODY_FILE=$(mktemp)
+
+          # 변경 내용 알림 메시지 작성
+          if [ "$ONLY_MD_CHANGES" = "true" ]; then
+            NOTICE_MSG=$(cat << EON
+
+          ## ⚠️ 변경된 코드 파일 없음 ⚠️
+
+          **이 PR에는 실제 코드 변경사항이 없습니다. 타임스탬프 파일만 업데이트되었습니다.**
+
+          현재 shadcn/ui v4와 이미 동기화된 상태입니다.
+
+          EON
+          )
+          else
+            NOTICE_MSG=""
+          fi
+
           cat > "$PR_BODY_FILE" << EOL
           # shadcn/ui v4 컴포넌트 동기화
 
           이 PR은 shadcn/ui v4의 monorepo 템플릿에서 컴포넌트, 유틸리티, 훅, 스타일을 동기화합니다.
-
+          $NOTICE_MSG
           ## 동기화된 항목
           - 컴포넌트 (\`/src/components/\`)
           - 유틸리티 (\`/src/lib/\`)
@@ -208,16 +240,22 @@ jobs:
 
           echo "Creating PR from branch $BRANCH_NAME to main..."
 
-          # 라벨 없이 PR 생성 (라벨 오류 회피)
-          PR_URL=$(gh pr create --base main --head "$BRANCH_NAME" --title "$TITLE" --body-file "$PR_BODY_FILE")
+          # PR 생성 - 리뷰어는 지정하고 라벨은 나중에 추가 (라벨 관련 오류 방지)
+          PR_URL=$(gh pr create --base main --head "$BRANCH_NAME" --title "$TITLE" --body-file "$PR_BODY_FILE" --reviewer "$REPO_OWNER")
 
           if [ $? -eq 0 ]; then
             echo "PR created successfully: $PR_URL"
             echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
 
-            # 라벨 추가 시도 (실패해도 계속 진행)
+            # PR 생성 후 별도로 라벨 추가 시도 (실패해도 워크플로우 계속 진행)
             echo "Trying to add labels..."
-            gh pr edit "$BRANCH_NAME" --add-label "enhancement" || echo "Could not add enhancement label, continuing..."
+            if [ "$ONLY_MD_CHANGES" = "true" ]; then
+              # 변경 없음 라벨 추가
+              gh pr edit "$BRANCH_NAME" --add-label "no-code-changes" || echo "Could not add no-code-changes label, continuing..."
+            else
+              # 일반 라벨 추가
+              gh pr edit "$BRANCH_NAME" --add-label "enhancement" || echo "Could not add enhancement label, continuing..."
+            fi
           else
             echo "Failed to create PR"
             exit 1
