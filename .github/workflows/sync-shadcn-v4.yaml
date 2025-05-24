@@ -126,8 +126,8 @@ jobs:
         run: |
           # 타임스탬프를 포함한 파일 생성으로 항상 main과 차이가 있도록 보장
           TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
-          echo "# shadcn/ui v4 sync timestamp: $TIMESTAMP" > packages/ui/src/SYNC_TIMESTAMP.md
-          echo "Last synced from shadcn/ui v4 on $TIMESTAMP" >> packages/ui/src/SYNC_TIMESTAMP.md
+          echo "# shadcn/ui v4 sync timestamp (UTC): $TIMESTAMP" > packages/ui/src/SYNC_TIMESTAMP.md
+          echo "Last synced from shadcn/ui v4 on $TIMESTAMP (UTC)" >> packages/ui/src/SYNC_TIMESTAMP.md
           echo "Repository: https://github.com/shadcn-ui/ui" >> packages/ui/src/SYNC_TIMESTAMP.md
           echo "Sync workflow run: $GITHUB_RUN_ID" >> packages/ui/src/SYNC_TIMESTAMP.md
 
@@ -180,7 +180,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BRANCH_NAME: ${{ steps.branch.outputs.branch_name }}
         run: |
-          TITLE="chore: sync shadcn/ui v4 components for monorepo [$(date +%Y-%m-%d)]"
+          TITLE="chore: sync shadcn/ui v4 components for monorepo [$(date +%Y-%m-%d) UTC]"
 
           # PR 본문 생성
           echo "Creating PR body file..."
@@ -202,7 +202,7 @@ jobs:
 
           변경사항을 검토하고 필요한 경우 수정 후 머지해주세요.
 
-          동기화 타임스탬프: $(date +"%Y-%m-%d %H:%M:%S")
+          동기화 타임스탬프 (UTC): $(date +"%Y-%m-%d %H:%M:%S")
           워크플로우 실행 ID: ${GITHUB_RUN_ID}
           EOL
 
