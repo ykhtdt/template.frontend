@@ -28,6 +28,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Git
         run: |
@@ -46,6 +47,19 @@ jobs:
       - name: Clone shadcn/ui v4
         run: git clone --depth=1 https://github.com/shadcn-ui/ui.git tmp-shadcn-ui
 
+      - name: Debug shadcn/ui structure
+        run: |
+          echo "Checking shadcn/ui repository structure..."
+          ls -la tmp-shadcn-ui
+          ls -la tmp-shadcn-ui/apps || echo "apps directory not found"
+          if [ -d "tmp-shadcn-ui/apps/v4" ]; then
+            ls -la tmp-shadcn-ui/apps/v4
+            ls -la tmp-shadcn-ui/apps/v4/registry || echo "registry directory not found"
+            if [ -d "tmp-shadcn-ui/apps/v4/registry/new-york-v4" ]; then
+              ls -la tmp-shadcn-ui/apps/v4/registry/new-york-v4
+            fi
+          fi
+
       - name: Copy components from shadcn/ui v4
         run: |
           echo "Creating directories..."
@@ -59,6 +73,8 @@ jobs:
             echo "UI components copied successfully"
           else
             echo "Error: UI components directory not found at expected path"
+            # Try to find the correct path
+            find tmp-shadcn-ui -name "ui" -type d | xargs ls -la 2>/dev/null || echo "No ui directories found"
             exit 1
           fi
 
@@ -68,6 +84,8 @@ jobs:
             echo "Lib files copied successfully"
           else
             echo "Warning: Lib directory not found at expected path"
+            # Try to find the correct path
+            find tmp-shadcn-ui -name "lib" -type d | xargs ls -la 2>/dev/null || echo "No lib directories found"
           fi
 
           # Copy hooks
@@ -76,6 +94,8 @@ jobs:
             echo "Hooks copied successfully"
           else
             echo "Warning: Hooks directory not found at expected path"
+            # Try to find the correct path
+            find tmp-shadcn-ui -name "hooks" -type d | xargs ls -la 2>/dev/null || echo "No hooks directories found"
           fi
 
           # Copy styles
@@ -84,6 +104,8 @@ jobs:
             echo "Styles copied successfully"
           else
             echo "Warning: Styles directory not found at expected path"
+            # Try to find the correct path
+            find tmp-shadcn-ui -name "styles" -type d | xargs ls -la 2>/dev/null || echo "No styles directories found"
           fi
 
           echo "Checking destination directories..."
@@ -107,8 +129,31 @@ jobs:
             echo "Changes detected, committing..."
             git add .
             git commit -m "chore: sync shadcn/ui v4 components for monorepo"
-            git push -f origin sync/shadcn-v4-monorepo
-            echo "changes=true" >> $GITHUB_OUTPUT
+
+            # Push with error checking
+            echo "Pushing changes to sync/shadcn-v4-monorepo branch..."
+            if git push -f origin sync/shadcn-v4-monorepo; then
+              echo "Push successful"
+              echo "changes=true" >> $GITHUB_OUTPUT
+            else
+              echo "Push failed, checking errors..."
+              git remote -v
+              git branch -a
+              echo "::error::Failed to push changes to remote repository"
+              exit 1
+            fi
+          fi
+
+      - name: Verify branch exists
+        if: steps.changes.outputs.changes == 'true'
+        run: |
+          echo "Verifying branch exists in remote..."
+          git fetch
+          if git branch -r | grep -q "origin/sync/shadcn-v4-monorepo"; then
+            echo "Branch exists in remote repository"
+          else
+            echo "::error::Branch not found in remote after push"
+            exit 1
           fi
 
       - name: Create Pull Request
