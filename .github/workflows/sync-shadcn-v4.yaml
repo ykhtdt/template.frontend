@@ -17,14 +17,14 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      IS_SCHEDULED: ${{ github.event_name == "schedule" }}
-      IS_MANUAL: ${{ github.event_name == "workflow_dispatch" }}
-      IS_MERGE_PR: ${{ github.event_name == "push" && github.ref == "refs/heads/main" && contains(github.event.head_commit.message, "Merge pull request") && contains(github.event.head_commit.message, "sync/shadcn-v4") }}
+      IS_SCHEDULED: ${{ github.event_name == 'schedule' }}
+      IS_MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
+      IS_MERGE_PR: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, 'Merge pull request') && contains(github.event.head_commit.message, 'sync/shadcn-v4') }}
 
     if: |
-      env.IS_SCHEDULED == "true" ||
-      env.IS_MANUAL == "true" ||
-      env.IS_MERGE_PR == "true"
+      env.IS_SCHEDULED == 'true' ||
+      env.IS_MANUAL == 'true' ||
+      env.IS_MERGE_PR == 'true'
 
     steps:
       - name: Checkout current repo
@@ -259,7 +259,7 @@ jobs:
           echo "::endgroup::"
 
       - name: Commit and push changes
-        if: steps.changes.outputs.changes == "true"
+        if: steps.changes.outputs.changes == 'true'
         run: |
           echo "::group::변경사항 커밋 및 푸시"
           BRANCH_NAME="${{ steps.branch.outputs.branch_name }}"
@@ -283,7 +283,7 @@ jobs:
           echo "::endgroup::"
 
       - name: Create Pull Request
-        if: steps.changes.outputs.changes == "true"
+        if: steps.changes.outputs.changes == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BRANCH_NAME: ${{ steps.branch.outputs.branch_name }}
