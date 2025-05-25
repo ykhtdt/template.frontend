@@ -15,13 +15,16 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
+
+    env:
+      IS_SCHEDULED: ${{ github.event_name == "schedule" }}
+      IS_MANUAL: ${{ github.event_name == "workflow_dispatch" }}
+      IS_MERGE_PR: ${{ github.event_name == "push" && github.ref == "refs/heads/main" && contains(github.event.head_commit.message, "Merge pull request") && contains(github.event.head_commit.message, "sync/shadcn-v4") }}
+
     if: |
-      github.event_name == 'schedule' ||
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' &&
-       github.ref == 'refs/heads/main' &&
-       contains(github.event.head_commit.message, 'Merge pull request') &&
-       contains(github.event.head_commit.message, 'sync/shadcn-v4'))
+      env.IS_SCHEDULED == "true" ||
+      env.IS_MANUAL == "true" ||
+      env.IS_MERGE_PR == "true"
 
     steps:
       - name: Checkout current repo
@@ -32,177 +35,280 @@ jobs:
 
       - name: Setup Git
         run: |
+          echo "::group::Git 사용자 설정"
+          echo "GitHub Actions 봇 사용자로 Git 설정"
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          echo "Git 사용자 설정 완료"
+          echo "::endgroup::"
 
       - name: Setup GitHub CLI
         run: |
-          echo "GitHub CLI version: $(gh --version | head -n 1)"
-          echo "Using pre-installed GitHub CLI"
+          echo "::group::GitHub CLI 설정"
+          echo "GitHub CLI 버전 확인: $(gh --version | head -n 1)"
+          echo "사전 설치된 GitHub CLI 사용"
+          echo "::endgroup::"
 
       - name: Install dependencies
         run: |
+          echo "::group::의존성 설치"
+          echo "시스템 패키지 업데이트 중..."
           sudo apt-get update -qq
+          echo "jq 패키지 설치 중..."
           sudo apt-get install -qq -y jq
+          echo "필요한 의존성 설치 완료"
+          echo "::endgroup::"
 
       - name: Generate unique branch name
         id: branch
         run: |
+          echo "::group::브랜치 생성"
           # 고유한 타임스탬프 생성
           TIMESTAMP=$(date +%Y%m%d%H%M%S)
           BRANCH_NAME="sync/shadcn-ui-v4-$TIMESTAMP"
+          echo "생성된 브랜치 이름: $BRANCH_NAME"
           echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
-          echo "Using branch name: $BRANCH_NAME"
 
           # 새 브랜치 생성
+          echo "main 브랜치에서 새 브랜치 생성 중..."
           git checkout -b "$BRANCH_NAME" origin/main
+          echo "브랜치 $BRANCH_NAME 생성 완료"
+          echo "::endgroup::"
 
       - name: Clone shadcn/ui v4
-        run: git clone --depth=1 https://github.com/shadcn-ui/ui.git tmp-shadcn-ui
+        run: |
+          echo "::group::shadcn/ui v4 레포지토리 클론"
+          echo "shadcn/ui 저장소 클론 중..."
+          git clone --depth=1 https://github.com/shadcn-ui/ui.git tmp-shadcn-ui
+          echo "shadcn/ui 저장소 클론 완료"
+          echo "::endgroup::"
 
       - name: Debug shadcn/ui structure
         run: |
-          echo "Checking shadcn/ui repository structure..."
+          echo "::group::shadcn/ui 구조 확인"
+          echo "shadcn/ui 저장소 구조 확인 중..."
+
+          # 루트 디렉토리 확인
+          echo "루트 디렉토리 내용:"
           ls -la tmp-shadcn-ui
-          ls -la tmp-shadcn-ui/apps || echo "apps directory not found"
+
+          # apps 디렉토리 확인
+          echo "apps 디렉토리 확인 중..."
+          ls -la tmp-shadcn-ui/apps || echo "apps 디렉토리를 찾을 수 없습니다"
+
+          # v4 디렉토리 구조 확인
           if [ -d "tmp-shadcn-ui/apps/v4" ]; then
+            echo "v4 디렉토리 내용:"
             ls -la tmp-shadcn-ui/apps/v4
-            ls -la tmp-shadcn-ui/apps/v4/registry || echo "registry directory not found"
+
+            echo "registry 디렉토리 확인 중..."
+            ls -la tmp-shadcn-ui/apps/v4/registry || echo "registry 디렉토리를 찾을 수 없습니다"
+
             if [ -d "tmp-shadcn-ui/apps/v4/registry/new-york-v4" ]; then
+              echo "new-york-v4 디렉토리 내용:"
               ls -la tmp-shadcn-ui/apps/v4/registry/new-york-v4
             fi
           fi
+          echo "shadcn/ui 구조 확인 완료"
+          echo "::endgroup::"
 
       - name: Copy components from shadcn/ui v4
         run: |
-          echo "Creating directories..."
+          echo "::group::컴포넌트 복사"
+
+          # 필요한 디렉토리 생성
+          echo "대상 디렉토리 생성 중..."
           mkdir -p packages/ui/src/{components,lib,hooks,styles}
+          echo "디렉토리 생성 완료"
 
-          echo "Copying from known structure at tmp-shadcn-ui/apps/v4/registry/new-york-v4..."
+          echo "shadcn-ui 컴포넌트 복사 시작 - 소스: tmp-shadcn-ui/apps/v4/registry/new-york-v4"
 
-          # Copy UI components
-          if [ -d "tmp-shadcn-ui/apps/v4/registry/new-york-v4/ui" ]; then
-            cp -rv tmp-shadcn-ui/apps/v4/registry/new-york-v4/ui/* packages/ui/src/components/
-            echo "UI components copied successfully"
+          # 소스와 대상 디렉토리 변수 정의
+          SRC_BASE="tmp-shadcn-ui/apps/v4/registry/new-york-v4"
+          DEST_BASE="packages/ui/src"
+
+          # UI 컴포넌트 복사
+          UI_SRC="$SRC_BASE/ui"
+          UI_DEST="$DEST_BASE/components"
+          if [ -d "$UI_SRC" ]; then
+            echo "UI 컴포넌트 복사 중: $UI_SRC -> $UI_DEST"
+            cp -rv "$UI_SRC"/* "$UI_DEST"/
+            echo "UI 컴포넌트 복사 완료"
           else
-            echo "Error: UI components directory not found at expected path"
-            # Try to find the correct path
-            find tmp-shadcn-ui -name "ui" -type d | xargs ls -la 2>/dev/null || echo "No ui directories found"
+            echo "오류: 예상 경로에서 UI 컴포넌트 디렉토리를 찾을 수 없습니다"
+            echo "가능한 UI 디렉토리 검색 중..."
+            find tmp-shadcn-ui -name "ui" -type d | xargs ls -la 2>/dev/null || echo "UI 디렉토리를 찾을 수 없습니다"
             exit 1
           fi
 
-          # Copy lib files
-          if [ -d "tmp-shadcn-ui/apps/v4/registry/new-york-v4/lib" ]; then
-            cp -rv tmp-shadcn-ui/apps/v4/registry/new-york-v4/lib/* packages/ui/src/lib/
-            echo "Lib files copied successfully"
+          # 라이브러리 파일 복사
+          LIB_SRC="$SRC_BASE/lib"
+          LIB_DEST="$DEST_BASE/lib"
+          if [ -d "$LIB_SRC" ]; then
+            echo "라이브러리 파일 복사 중: $LIB_SRC -> $LIB_DEST"
+            cp -rv "$LIB_SRC"/* "$LIB_DEST"/
+            echo "라이브러리 파일 복사 완료"
           else
-            echo "Warning: Lib directory not found at expected path"
-            # Try to find the correct path
-            find tmp-shadcn-ui -name "lib" -type d | xargs ls -la 2>/dev/null || echo "No lib directories found"
+            echo "경고: 예상 경로에서 라이브러리 디렉토리를 찾을 수 없습니다"
+            echo "가능한 lib 디렉토리 검색 중..."
+            find tmp-shadcn-ui -name "lib" -type d | xargs ls -la 2>/dev/null || echo "lib 디렉토리를 찾을 수 없습니다"
           fi
 
-          # Copy hooks
-          if [ -d "tmp-shadcn-ui/apps/v4/registry/new-york-v4/hooks" ]; then
-            cp -rv tmp-shadcn-ui/apps/v4/registry/new-york-v4/hooks/* packages/ui/src/hooks/
-            echo "Hooks copied successfully"
+          # 훅 파일 복사
+          HOOKS_SRC="$SRC_BASE/hooks"
+          HOOKS_DEST="$DEST_BASE/hooks"
+          if [ -d "$HOOKS_SRC" ]; then
+            echo "훅 파일 복사 중: $HOOKS_SRC -> $HOOKS_DEST"
+            cp -rv "$HOOKS_SRC"/* "$HOOKS_DEST"/
+            echo "훅 파일 복사 완료"
           else
-            echo "Warning: Hooks directory not found at expected path"
-            # Try to find the correct path
-            find tmp-shadcn-ui -name "hooks" -type d | xargs ls -la 2>/dev/null || echo "No hooks directories found"
+            echo "경고: 예상 경로에서 훅 디렉토리를 찾을 수 없습니다"
+            echo "가능한 hooks 디렉토리 검색 중..."
+            find tmp-shadcn-ui -name "hooks" -type d | xargs ls -la 2>/dev/null || echo "hooks 디렉토리를 찾을 수 없습니다"
           fi
 
-          # Copy styles
-          if [ -d "tmp-shadcn-ui/apps/v4/registry/new-york-v4/styles" ]; then
-            cp -rv tmp-shadcn-ui/apps/v4/registry/new-york-v4/styles/* packages/ui/src/styles/
-            echo "Styles copied successfully"
+          # 스타일 파일 복사
+          STYLES_SRC="$SRC_BASE/styles"
+          STYLES_DEST="$DEST_BASE/styles"
+          if [ -d "$STYLES_SRC" ]; then
+            echo "스타일 파일 복사 중: $STYLES_SRC -> $STYLES_DEST"
+            cp -rv "$STYLES_SRC"/* "$STYLES_DEST"/
+            echo "스타일 파일 복사 완료"
           else
-            echo "Warning: Styles directory not found at expected path"
-            # Try to find the correct path
-            find tmp-shadcn-ui -name "styles" -type d | xargs ls -la 2>/dev/null || echo "No styles directories found"
+            echo "경고: 예상 경로에서 스타일 디렉토리를 찾을 수 없습니다"
+            echo "가능한 styles 디렉토리 검색 중..."
+            find tmp-shadcn-ui -name "styles" -type d | xargs ls -la 2>/dev/null || echo "styles 디렉토리를 찾을 수 없습니다"
           fi
 
-          echo "Checking destination directories..."
-          ls -la packages/ui/src/components
-          ls -la packages/ui/src/lib 2>/dev/null || echo "No lib files copied"
-          ls -la packages/ui/src/hooks 2>/dev/null || echo "No hooks copied"
-          ls -la packages/ui/src/styles 2>/dev/null || echo "No styles copied"
+          # 복사 결과 확인
+          echo "복사된 디렉토리 내용 확인 중..."
+          echo "컴포넌트 디렉토리:"
+          ls -la "$UI_DEST"
+          echo "라이브러리 디렉토리:"
+          ls -la "$LIB_DEST" 2>/dev/null || echo "복사된 lib 파일 없음"
+          echo "훅 디렉토리:"
+          ls -la "$HOOKS_DEST" 2>/dev/null || echo "복사된 hooks 파일 없음"
+          echo "스타일 디렉토리:"
+          ls -la "$STYLES_DEST" 2>/dev/null || echo "복사된 styles 파일 없음"
+          echo "컴포넌트 복사 완료"
+          echo "::endgroup::"
 
       - name: Add timestamp to ensure differences
         run: |
+          echo "::group::타임스탬프 파일 생성"
           # 타임스탬프를 포함한 파일 생성으로 항상 main과 차이가 있도록 보장
           TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
-          echo "# shadcn/ui v4 sync timestamp (UTC): $TIMESTAMP" > packages/ui/src/SYNC_TIMESTAMP.md
-          echo "Last synced from shadcn/ui v4 on $TIMESTAMP (UTC)" >> packages/ui/src/SYNC_TIMESTAMP.md
-          echo "Repository: https://github.com/shadcn-ui/ui" >> packages/ui/src/SYNC_TIMESTAMP.md
-          echo "Sync workflow run: $GITHUB_RUN_ID" >> packages/ui/src/SYNC_TIMESTAMP.md
+          TIMESTAMP_FILE="packages/ui/src/SYNC_TIMESTAMP.md"
+
+          echo "타임스탬프 파일 생성 중: $TIMESTAMP_FILE"
+          echo "# shadcn/ui v4 sync timestamp (UTC): $TIMESTAMP" > "$TIMESTAMP_FILE"
+          echo "Last synced from shadcn/ui v4 on $TIMESTAMP (UTC)" >> "$TIMESTAMP_FILE"
+          echo "Repository: https://github.com/shadcn-ui/ui" >> "$TIMESTAMP_FILE"
+          echo "Sync workflow run: $GITHUB_RUN_ID" >> "$TIMESTAMP_FILE"
+
+          echo "타임스탬프 파일 생성 완료"
+          echo "::endgroup::"
 
       - name: Clean up temporary files
-        run: rm -rf tmp-shadcn-ui
+        run: |
+          echo "::group::임시 파일 정리"
+          echo "임시 shadcn/ui 클론 디렉토리 삭제 중..."
+          rm -rf tmp-shadcn-ui
+          echo "임시 파일 정리 완료"
+          echo "::endgroup::"
 
       - name: Check for changes
         id: changes
         run: |
+          echo "::group::변경사항 확인"
+          echo "Git 상태 확인 중..."
           git status
-          # Check if there's anything to commit
+
+          # 변경사항 여부 확인 변수 설정
+          HAS_CHANGES=false
+          ONLY_MD_CHANGES=false
+
+          # 커밋할 변경사항이 있는지 확인
           if [ -z "$(git status --porcelain)" ]; then
-            echo "No changes detected"
+            echo "변경사항이 감지되지 않았습니다"
+            HAS_CHANGES=false
             echo "changes=false" >> $GITHUB_OUTPUT
           else
-            echo "Changes detected"
+            echo "변경사항이 감지되었습니다"
+            HAS_CHANGES=true
             echo "changes=true" >> $GITHUB_OUTPUT
 
             # 변경된 파일 목록 가져오기
             CHANGED_FILES=$(git diff --name-only --staged || git diff --name-only)
-            echo "Changed files:"
+            echo "변경된 파일 목록:"
             echo "$CHANGED_FILES"
 
             # 실제 코드 파일(md 파일 제외)이 변경되었는지 확인
             NON_MD_CHANGES=$(echo "$CHANGED_FILES" | grep -v "\.md$" || true)
             if [ -z "$NON_MD_CHANGES" ]; then
-              echo "Only markdown files changed"
+              echo "마크다운 파일만 변경되었습니다"
+              ONLY_MD_CHANGES=true
               echo "only_md_changes=true" >> $GITHUB_OUTPUT
             else
-              echo "Code files changed"
+              echo "코드 파일이 변경되었습니다"
+              ONLY_MD_CHANGES=false
               echo "only_md_changes=false" >> $GITHUB_OUTPUT
             fi
           fi
+          echo "변경사항 확인 완료"
+          echo "::endgroup::"
 
       - name: Commit and push changes
-        if: steps.changes.outputs.changes == 'true'
+        if: steps.changes.outputs.changes == "true"
         run: |
+          echo "::group::변경사항 커밋 및 푸시"
           BRANCH_NAME="${{ steps.branch.outputs.branch_name }}"
           TIMESTAMP=$(date +"%Y-%m-%d")
+          COMMIT_MSG="chore: sync shadcn/ui v4 components for monorepo [$TIMESTAMP]"
 
+          echo "변경사항 스테이징 중..."
           git add .
-          git commit -m "chore: sync shadcn/ui v4 components for monorepo [$TIMESTAMP]"
 
-          echo "Pushing changes to $BRANCH_NAME branch..."
+          echo "변경사항 커밋 중: $COMMIT_MSG"
+          git commit -m "$COMMIT_MSG"
+
+          echo "$BRANCH_NAME 브랜치에 변경사항 푸시 중..."
           if git push -u origin "$BRANCH_NAME"; then
-            echo "Push successful"
+            echo "푸시 성공"
           else
-            echo "Push failed"
+            echo "푸시 실패"
             exit 1
           fi
+          echo "변경사항 커밋 및 푸시 완료"
+          echo "::endgroup::"
 
       - name: Create Pull Request
-        if: steps.changes.outputs.changes == 'true'
+        if: steps.changes.outputs.changes == "true"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BRANCH_NAME: ${{ steps.branch.outputs.branch_name }}
           ONLY_MD_CHANGES: ${{ steps.changes.outputs.only_md_changes }}
         run: |
-          TITLE="chore: sync shadcn/ui v4 components for monorepo [$(date +%Y-%m-%d) UTC]"
+          echo "::group::PR 생성"
+          # PR 제목 설정
+          PR_DATE=$(date +"%Y-%m-%d")
+          TITLE="chore: sync shadcn/ui v4 components for monorepo [$PR_DATE UTC]"
+          echo "PR 제목: $TITLE"
 
           # 저장소 소유자 정보 가져오기
+          echo "저장소 소유자 정보 가져오기..."
           REPO_OWNER=$(gh repo view --json owner -q .owner.login)
-          echo "Repository owner: $REPO_OWNER"
+          echo "저장소 소유자: $REPO_OWNER"
 
           # PR 본문 생성
-          echo "Creating PR body file..."
+          echo "PR 본문 파일 생성 중..."
           PR_BODY_FILE=$(mktemp)
+          echo "임시 PR 본문 파일 생성됨: $PR_BODY_FILE"
 
           # 변경 내용 알림 메시지 작성
+          NOTICE_MSG=""
           if [ "$ONLY_MD_CHANGES" = "true" ]; then
+            echo "마크다운 파일만 변경되었음을 알리는 메시지 작성 중..."
             NOTICE_MSG=$(cat << EON
 
           ## ⚠️ 변경된 코드 파일 없음 ⚠️
@@ -212,11 +318,11 @@ jobs:
           현재 shadcn/ui v4와 이미 동기화된 상태입니다.
 
           EON
-          )
-          else
-            NOTICE_MSG=""
+            )
           fi
 
+          # PR 본문 작성
+          echo "PR 본문 작성 중..."
           cat > "$PR_BODY_FILE" << EOL
           # shadcn/ui v4 컴포넌트 동기화
 
@@ -238,25 +344,31 @@ jobs:
           워크플로우 실행 ID: ${GITHUB_RUN_ID}
           EOL
 
-          echo "Creating PR from branch $BRANCH_NAME to main..."
+          echo "main 브랜치에서 $BRANCH_NAME 브랜치로 PR 생성 중..."
 
-          # PR 생성 - 리뷰어는 지정하고 라벨은 나중에 추가 (라벨 관련 오류 방지)
+          # PR 생성 - 리뷰어는 지정하고 라벨은 나중에 추가
+          echo "PR 생성 중..."
           PR_URL=$(gh pr create --base main --head "$BRANCH_NAME" --title "$TITLE" --body-file "$PR_BODY_FILE" --reviewer "$REPO_OWNER")
+          PR_STATUS=$?
 
-          if [ $? -eq 0 ]; then
-            echo "PR created successfully: $PR_URL"
+          if [ $PR_STATUS -eq 0 ]; then
+            echo "PR 생성 성공: $PR_URL"
             echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
 
-            # PR 생성 후 별도로 라벨 추가 시도 (실패해도 워크플로우 계속 진행)
-            echo "Trying to add labels..."
+            # PR 라벨 추가
+            echo "PR 라벨 추가 중..."
             if [ "$ONLY_MD_CHANGES" = "true" ]; then
               # 변경 없음 라벨 추가
-              gh pr edit "$BRANCH_NAME" --add-label "no-code-changes" || echo "Could not add no-code-changes label, continuing..."
+              echo "no-code-changes 라벨 추가 중..."
+              gh pr edit "$BRANCH_NAME" --add-label "no-code-changes" || echo "no-code-changes 라벨 추가 실패, 계속 진행합니다"
             else
               # 일반 라벨 추가
-              gh pr edit "$BRANCH_NAME" --add-label "enhancement" || echo "Could not add enhancement label, continuing..."
+              echo "enhancement 라벨 추가 중..."
+              gh pr edit "$BRANCH_NAME" --add-label "enhancement" || echo "enhancement 라벨 추가 실패, 계속 진행합니다"
             fi
           else
-            echo "Failed to create PR"
+            echo "PR 생성 실패"
             exit 1
           fi
+          echo "PR 생성 프로세스 완료"
+          echo "::endgroup::"
