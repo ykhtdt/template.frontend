@@ -16,15 +16,13 @@ jobs:
   sync:
     runs-on: ubuntu-latest
 
-    env:
-      IS_SCHEDULED: ${{ github.event_name == 'schedule' }}
-      IS_MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
-      IS_MERGE_PR: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, 'Merge pull request') && contains(github.event.head_commit.message, 'sync/shadcn-v4') }}
-
     if: |
-      env.IS_SCHEDULED == 'true' ||
-      env.IS_MANUAL == 'true' ||
-      env.IS_MERGE_PR == 'true'
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' &&
+       github.ref == 'refs/heads/main' &&
+       contains(github.event.head_commit.message, 'Merge pull request') &&
+       contains(github.event.head_commit.message, 'sync/shadcn-v4'))
 
     steps:
       - name: Checkout current repo
