@@ -236,13 +236,20 @@ jobs:
             HAS_CHANGES=true
             echo "changes=true" >> $GITHUB_OUTPUT
 
-            # 변경된 파일 목록 가져오기
-            CHANGED_FILES=$(git diff --name-only --staged || git diff --name-only)
+            # 변경된 파일 목록 가져오기 (unstaged 및 staged 변경사항 모두 포함)
+            echo "변경된 파일 목록 가져오기..."
+            git add -A  # 모든 변경사항을 스테이징
+            CHANGED_FILES=$(git diff --name-only --staged)
             echo "변경된 파일 목록:"
             echo "$CHANGED_FILES"
 
             # 실제 코드 파일(md 파일 제외)이 변경되었는지 확인
+            # 마크다운이 아닌 파일 찾기
             NON_MD_CHANGES=$(echo "$CHANGED_FILES" | grep -v "\.md$" || true)
+            echo "코드 파일 변경 여부 확인 중..."
+            echo "마크다운이 아닌 변경 파일:"
+            echo "$NON_MD_CHANGES"
+
             if [ -z "$NON_MD_CHANGES" ]; then
               echo "마크다운 파일만 변경되었습니다"
               ONLY_MD_CHANGES=true
@@ -252,6 +259,12 @@ jobs:
               ONLY_MD_CHANGES=false
               echo "only_md_changes=false" >> $GITHUB_OUTPUT
             fi
+
+            # 변경사항 확인을 위해 변경된 파일 개수 출력
+            MD_FILES_COUNT=$(echo "$CHANGED_FILES" | grep "\.md$" | wc -l)
+            NON_MD_FILES_COUNT=$(echo "$NON_MD_CHANGES" | wc -l)
+            echo "변경된 마크다운 파일 수: $MD_FILES_COUNT"
+            echo "변경된 코드 파일 수: $NON_MD_FILES_COUNT"
           fi
           echo "변경사항 확인 완료"
           echo "::endgroup::"
@@ -298,15 +311,29 @@ jobs:
           REPO_OWNER=$(gh repo view --json owner -q .owner.login)
           echo "저장소 소유자: $REPO_OWNER"
 
+          # 변경된 파일 목록 가져오기
+          echo "변경된 파일 목록 가져오기..."
+          CHANGED_FILES=$(git diff --name-only origin/main)
+          NON_MD_FILES=$(echo "$CHANGED_FILES" | grep -v "\.md$" || true)
+          MD_FILES=$(echo "$CHANGED_FILES" | grep "\.md$" || true)
+
+          # 변경 파일 요약
+          NON_MD_COUNT=$(echo "$NON_MD_FILES" | grep -v "^$" | wc -l)
+          MD_COUNT=$(echo "$MD_FILES" | grep -v "^$" | wc -l)
+          echo "변경된 코드 파일: $NON_MD_COUNT개"
+          echo "변경된 마크다운 파일: $MD_COUNT개"
+
           # PR 본문 생성
           echo "PR 본문 파일 생성 중..."
           PR_BODY_FILE=$(mktemp)
           echo "임시 PR 본문 파일 생성됨: $PR_BODY_FILE"
 
           # 변경 내용 알림 메시지 작성
+          # 실제 파일 변경 내용을 기반으로 메시지 작성
+          echo "변경 내용 메시지 작성 중..."
           NOTICE_MSG=""
-          if [ "$ONLY_MD_CHANGES" = "true" ]; then
-            echo "마크다운 파일만 변경되었음을 알리는 메시지 작성 중..."
+          if [ "$NON_MD_COUNT" -eq 0 ] && [ "$MD_COUNT" -gt 0 ]; then
+            echo "마크다운 파일만 변경되었음을 감지함"
             NOTICE_MSG=$(cat << EON
 
           ## ⚠️ 변경된 코드 파일 없음 ⚠️
@@ -317,6 +344,30 @@ jobs:
 
           EON
             )
+          else
+            echo "코드 파일 변경 감지됨"
+            NOTICE_MSG=$(cat << EON
+
+          ## 🔄 변경된 파일 정보
+
+          **총 ${NON_MD_COUNT}개의 코드 파일과 ${MD_COUNT}개의 마크다운 파일이 업데이트되었습니다.**
+
+          EON
+            )
+
+            # 변경된 코드 파일 목록 추가 (10개까지만)
+            if [ "$NON_MD_COUNT" -gt 0 ]; then
+              NOTICE_MSG+=$(cat << EON
+
+          ### 주요 변경 파일:
+          \`\`\`
+          $(echo "$NON_MD_FILES" | head -n 10)
+          $([ "$NON_MD_COUNT" -gt 10 ] && echo "... 그 외 $(($NON_MD_COUNT - 10))개 파일")
+          \`\`\`
+
+          EON
+              )
+            fi
           fi
 
           # PR 본문 작성
@@ -355,7 +406,7 @@ jobs:
 
             # PR 라벨 추가
             echo "PR 라벨 추가 중..."
-            if [ "$ONLY_MD_CHANGES" = "true" ]; then
+            if [ "$NON_MD_COUNT" -eq 0 ] && [ "$MD_COUNT" -gt 0 ]; then
               # 변경 없음 라벨 추가
               echo "no-code-changes 라벨 추가 중..."
               gh pr edit "$BRANCH_NAME" --add-label "no-code-changes" || echo "no-code-changes 라벨 추가 실패, 계속 진행합니다"
